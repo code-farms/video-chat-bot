@@ -1,15 +1,18 @@
+
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { Send } from 'lucide-react';
+import { Send, Loader2 } from 'lucide-react'; // Import Loader2 for loading state
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { addMessage, selectMessages } from '@/lib/redux/slices/chatSlice'; // Import Redux actions and selectors
-import type { AppDispatch } from '@/lib/redux/store'; // Import AppDispatch type
-import { cn } from '@/lib/utils'; // Import cn utility
+import { addMessage, selectMessages } from '@/lib/redux/slices/chatSlice';
+import type { AppDispatch } from '@/lib/redux/store';
+import { cn } from '@/lib/utils';
+import { chatWithAI } from '@/ai/flows/chat-flow'; // Import the Genkit flow
+import { useToast } from '@/hooks/use-toast'; // Import useToast for error handling
 
 // Define message type if not already defined globally
 interface Message {
@@ -23,21 +26,38 @@ export default function ChatWindow() {
   const messages: Message[] = useSelector(selectMessages);
   const dispatch = useDispatch<AppDispatch>();
   const [newMessage, setNewMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false); // State for loading indicator
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-  // Use a more specific ref type for the viewport if possible, or keep as any
   const viewportRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast(); // Initialize toast hook
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newMessage.trim()) {
-      // Dispatch action to add the new message
-      dispatch(addMessage({ text: newMessage, sender: 'user' }));
-      setNewMessage(''); // Clear input field
+    const trimmedMessage = newMessage.trim();
+    if (!trimmedMessage || isLoading) return; // Prevent sending empty messages or during loading
 
-      // Simulate receiving a response after a short delay (for demonstration)
-      setTimeout(() => {
-        dispatch(addMessage({ text: `Echo: ${newMessage}`, sender: 'other' }));
-      }, 500);
+    // Dispatch user message
+    dispatch(addMessage({ text: trimmedMessage, sender: 'user' }));
+    setNewMessage(''); // Clear input field immediately
+    setIsLoading(true); // Set loading state
+
+    try {
+      // Call the Genkit flow
+      const aiResponse = await chatWithAI({ userMessage: trimmedMessage });
+      // Dispatch AI response
+      dispatch(addMessage({ text: aiResponse.aiResponse, sender: 'other' }));
+    } catch (error) {
+      console.error('Error calling AI chat flow:', error);
+      // Show error toast to the user
+      toast({
+        title: 'Error',
+        description: 'Failed to get AI response. Please try again.',
+        variant: 'destructive',
+      });
+      // Optionally, add a system message indicating failure
+       dispatch(addMessage({ text: 'Sorry, I could not process your request.', sender: 'other' }));
+    } finally {
+      setIsLoading(false); // Reset loading state
     }
   };
 
@@ -53,9 +73,8 @@ export default function ChatWindow() {
   return (
     <div className="flex flex-col h-full bg-card text-card-foreground rounded-lg shadow">
       <h2 className="text-lg font-semibold p-4 border-b border-border text-primary">Chat</h2>
-      {/* Use ScrollArea's viewport prop for direct ref */}
       <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
-         <div ref={viewportRef} className="h-full space-y-4" data-radix-scroll-area-viewport=""> {/* Assign ref to the viewport div */}
+         <div ref={viewportRef} className="h-full space-y-4" data-radix-scroll-area-viewport="">
            {messages.map((message) => (
              <div
                key={message.id}
@@ -66,13 +85,13 @@ export default function ChatWindow() {
              >
                {message.sender === 'other' && (
                   <Avatar className="h-8 w-8 shrink-0">
-                    <AvatarImage src={`https://i.pravatar.cc/32?u=${message.sender}`} alt="Other User" />
-                    <AvatarFallback>{message.sender.charAt(0).toUpperCase()}</AvatarFallback>
+                    <AvatarImage src={`/ai-avatar.png`} alt="AI Assistant" /> {/* Consistent AI Avatar */}
+                    <AvatarFallback>AI</AvatarFallback>
                   </Avatar>
                )}
                <div
                  className={cn(
-                   'max-w-[75%] rounded-lg p-3 text-sm',
+                   'max-w-[75%] rounded-lg p-3 text-sm break-words', // Added break-words
                    message.sender === 'user'
                      ? 'bg-primary text-primary-foreground'
                      : 'bg-muted text-muted-foreground'
@@ -85,13 +104,26 @@ export default function ChatWindow() {
                </div>
                 {message.sender === 'user' && (
                   <Avatar className="h-8 w-8 shrink-0">
-                    {/* Placeholder for user avatar */}
                      <AvatarImage src={`https://i.pravatar.cc/32?u=user`} alt="User" />
                     <AvatarFallback>U</AvatarFallback>
                   </Avatar>
                 )}
              </div>
            ))}
+           {/* Optional: Show typing indicator while loading */}
+           {isLoading && (
+             <div className="flex items-start gap-3 justify-start">
+               <Avatar className="h-8 w-8 shrink-0">
+                  <AvatarImage src={`/ai-avatar.png`} alt="AI Assistant" />
+                  <AvatarFallback>AI</AvatarFallback>
+               </Avatar>
+               <div className="max-w-[75%] rounded-lg p-3 text-sm bg-muted text-muted-foreground">
+                 <p className="italic flex items-center gap-1">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Typing...
+                 </p>
+               </div>
+             </div>
+           )}
          </div>
        </ScrollArea>
       <form onSubmit={handleSendMessage} className="p-4 border-t border-border flex items-center gap-2">
@@ -102,9 +134,10 @@ export default function ChatWindow() {
           onChange={(e) => setNewMessage(e.target.value)}
           className="flex-1"
           aria-label="Chat message input"
+          disabled={isLoading} // Disable input while loading
         />
-        <Button type="submit" size="icon" aria-label="Send message">
-          <Send className="h-4 w-4" />
+        <Button type="submit" size="icon" aria-label="Send message" disabled={isLoading || !newMessage.trim()}>
+          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </Button>
       </form>
     </div>
