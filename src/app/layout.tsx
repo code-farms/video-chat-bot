@@ -22,7 +22,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning> {/* Add suppressHydrationWarning for theme persistence */}
+    <html lang="en" suppressHydrationWarning>
+      {/*
+        The head tag is automatically managed by Next.js.
+        Avoid adding tags like <title> or <meta> directly here.
+        Metadata should be defined using the `metadata` export above.
+        https://nextjs.org/docs/app/building-your-application/optimizing/metadata
+      */}
+      <head />
       {/* Apply Nunito font class to the body */}
       <body className={`${nunito.className} antialiased`}>
         <ThemeProvider
