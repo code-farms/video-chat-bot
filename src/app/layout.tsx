@@ -1,21 +1,17 @@
 import type {Metadata} from 'next';
-import {Geist, Geist_Mono} from 'next/font/google';
+import { Nunito } from 'next/font/google'; // Import Nunito font
 import './globals.css';
 import ReduxProvider from '@/lib/redux/provider'; // Import ReduxProvider
 
-const geistSans = Geist({
-  variable: '--font-geist-sans',
+// Configure Nunito font
+const nunito = Nunito({
   subsets: ['latin'],
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
+  variable: '--font-nunito', // Optional: Define CSS variable if needed
 });
 
 export const metadata: Metadata = {
-  title: 'VideoChat Hub', // Updated title
-  description: 'Upload, preview videos, and chat.', // Updated description
+  title: 'VideoChat Hub',
+  description: 'Upload, preview videos, and chat.',
 };
 
 export default function RootLayout({
@@ -25,7 +21,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      {/* Apply Nunito font class to the body */}
+      <body className={`${nunito.className} antialiased`}>
         <ReduxProvider>{children}</ReduxProvider> {/* Wrap children with ReduxProvider */}
       </body>
     </html>
