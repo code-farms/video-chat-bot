@@ -23,6 +23,11 @@ export default function ChatWindow() {
       // Dispatch action to add the new message (assuming sender is 'user')
       dispatch(addMessage({ text: newMessage, sender: 'user' }));
       setNewMessage(''); // Clear input field
+
+      // Simulate receiving a response after a short delay
+      setTimeout(() => {
+        dispatch(addMessage({ text: `Echo: ${newMessage}`, sender: 'other' }));
+      }, 500);
     }
   };
 
@@ -54,8 +59,8 @@ export default function ChatWindow() {
             >
               {message.sender !== 'user' && (
                  <Avatar className="h-8 w-8">
-                   <AvatarImage src="https://picsum.photos/32/32" alt="Other User" />
-                   <AvatarFallback>O</AvatarFallback>
+                   <AvatarImage src={`https://i.pravatar.cc/32?u=${message.sender}`} alt="Other User" />
+                   <AvatarFallback>{message.sender.charAt(0).toUpperCase()}</AvatarFallback>
                  </Avatar>
               )}
               <div
@@ -74,6 +79,7 @@ export default function ChatWindow() {
                {message.sender === 'user' && (
                  <Avatar className="h-8 w-8">
                    {/* You can add a user avatar source here if available */}
+                    <AvatarImage src={`https://i.pravatar.cc/32?u=user`} alt="User" />
                    <AvatarFallback>U</AvatarFallback>
                  </Avatar>
                )}
