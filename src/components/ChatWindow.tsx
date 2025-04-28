@@ -3,7 +3,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { Send, Loader2 } from 'lucide-react'; // Import Loader2 for loading state
+import { Send, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -11,8 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { addMessage, selectMessages } from '@/lib/redux/slices/chatSlice';
 import type { AppDispatch } from '@/lib/redux/store';
 import { cn } from '@/lib/utils';
-import { chatWithAI } from '@/ai/flows/chat-flow'; // Import the Genkit flow
-import { useToast } from '@/hooks/use-toast'; // Import useToast for error handling
+import { useToast } from '@/hooks/use-toast';
 
 // Define message type if not already defined globally
 interface Message {
@@ -26,38 +25,64 @@ export default function ChatWindow() {
   const messages: Message[] = useSelector(selectMessages);
   const dispatch = useDispatch<AppDispatch>();
   const [newMessage, setNewMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false); // State for loading indicator
+  const [isLoading, setIsLoading] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const { toast } = useToast(); // Initialize toast hook
+  const { toast } = useToast();
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedMessage = newMessage.trim();
-    if (!trimmedMessage || isLoading) return; // Prevent sending empty messages or during loading
+    if (!trimmedMessage || isLoading) return;
 
     // Dispatch user message
     dispatch(addMessage({ text: trimmedMessage, sender: 'user' }));
-    setNewMessage(''); // Clear input field immediately
-    setIsLoading(true); // Set loading state
+    setNewMessage('');
+    setIsLoading(true);
 
     try {
-      // Call the Genkit flow
-      const aiResponse = await chatWithAI({ userMessage: trimmedMessage });
+      // Call the new Next.js API route
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userMessage: trimmedMessage }),
+      });
+
+      if (!response.ok) {
+        // Try to parse error message from backend
+        let errorData;
+        try {
+            errorData = await response.json();
+        } catch (parseError) {
+            // If parsing fails, use the status text
+            throw new Error(response.statusText || `HTTP error! status: ${response.status}`);
+        }
+        throw new Error(errorData?.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (!data.aiResponse) {
+        throw new Error('AI response format incorrect');
+      }
+
       // Dispatch AI response
-      dispatch(addMessage({ text: aiResponse.aiResponse, sender: 'other' }));
+      dispatch(addMessage({ text: data.aiResponse, sender: 'other' }));
+
     } catch (error) {
-      console.error('Error calling AI chat flow:', error);
-      // Show error toast to the user
+      console.error('Error calling chat API:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to get AI response. Please try again.';
       toast({
         title: 'Error',
-        description: 'Failed to get AI response. Please try again.',
+        description: errorMessage,
         variant: 'destructive',
       });
       // Optionally, add a system message indicating failure
        dispatch(addMessage({ text: 'Sorry, I could not process your request.', sender: 'other' }));
     } finally {
-      setIsLoading(false); // Reset loading state
+      setIsLoading(false);
     }
   };
 
@@ -85,13 +110,14 @@ export default function ChatWindow() {
              >
                {message.sender === 'other' && (
                   <Avatar className="h-8 w-8 shrink-0">
-                    <AvatarImage src={`/ai-avatar.png`} alt="AI Assistant" /> {/* Consistent AI Avatar */}
+                    {/* Placeholder for AI avatar, replace if you have one */}
+                    {/* <AvatarImage src={`/ai-avatar.png`} alt="AI Assistant" />  */}
                     <AvatarFallback>AI</AvatarFallback>
                   </Avatar>
                )}
                <div
                  className={cn(
-                   'max-w-[75%] rounded-lg p-3 text-sm break-words', // Added break-words
+                   'max-w-[75%] rounded-lg p-3 text-sm break-words',
                    message.sender === 'user'
                      ? 'bg-primary text-primary-foreground'
                      : 'bg-muted text-muted-foreground'
@@ -114,7 +140,7 @@ export default function ChatWindow() {
            {isLoading && (
              <div className="flex items-start gap-3 justify-start">
                <Avatar className="h-8 w-8 shrink-0">
-                  <AvatarImage src={`/ai-avatar.png`} alt="AI Assistant" />
+                  {/* <AvatarImage src={`/ai-avatar.png`} alt="AI Assistant" /> */}
                   <AvatarFallback>AI</AvatarFallback>
                </Avatar>
                <div className="max-w-[75%] rounded-lg p-3 text-sm bg-muted text-muted-foreground">
