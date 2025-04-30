@@ -41,13 +41,14 @@ export default function ChatWindow() {
     setIsLoading(true);
 
     try {
-      // Call the new Next.js API route
-      const response = await fetch('/api/chat', {
+      // Call the Next.js proxy API route
+      const response = await fetch('/api/fastapi-proxy', { // Changed endpoint
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ userMessage: trimmedMessage }),
+        // Send message in the format expected by FastAPI backend
+        body: JSON.stringify({ message: trimmedMessage }),
       });
 
       if (!response.ok) {
@@ -57,22 +58,25 @@ export default function ChatWindow() {
             errorData = await response.json();
         } catch (parseError) {
             // If parsing fails, use the status text
-            throw new Error(response.statusText || `HTTP error! status: ${response.status}`);
+            throw new Error(`HTTP error! status: ${response.status} - ${response.statusText}`);
         }
-        throw new Error(errorData?.error || `HTTP error! status: ${response.status}`);
+         // Use 'error' from proxy or 'detail' from FastAPI if available
+        throw new Error(errorData?.error || errorData?.detail || `HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
 
-      if (!data.aiResponse) {
-        throw new Error('AI response format incorrect');
+      // Adjust based on the actual response structure from FastAPI via the proxy
+      // Assuming FastAPI returns { response: "AI message" }
+      if (!data.response) {
+        throw new Error('AI response format incorrect from backend');
       }
 
       // Dispatch AI response
-      dispatch(addMessage({ text: data.aiResponse, sender: 'other' }));
+      dispatch(addMessage({ text: data.response, sender: 'other' }));
 
     } catch (error) {
-      console.error('Error calling chat API:', error);
+      console.error('Error calling chat proxy API:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to get AI response. Please try again.';
       toast({
         title: 'Error',
@@ -90,7 +94,10 @@ export default function ChatWindow() {
   useEffect(() => {
     const viewport = viewportRef.current;
     if (viewport) {
-      viewport.scrollTop = viewport.scrollHeight;
+      // Use requestAnimationFrame for smoother scrolling after render
+      requestAnimationFrame(() => {
+         viewport.scrollTop = viewport.scrollHeight;
+      });
     }
   }, [messages]);
 
@@ -99,7 +106,12 @@ export default function ChatWindow() {
     <div className="flex flex-col h-full bg-card text-card-foreground rounded-lg shadow">
       <h2 className="text-lg font-semibold p-4 border-b border-border text-primary">Chat</h2>
       <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
-         <div ref={viewportRef} className="h-full space-y-4" data-radix-scroll-area-viewport="">
+         {/*
+           This div is the viewport for the ScrollArea.
+           It needs `data-radix-scroll-area-viewport=""` for styling/functionality if using Radix directly,
+           but ShadCN's ScrollArea handles this. Ensure it has `h-full` to fill the ScrollArea.
+         */}
+         <div ref={viewportRef} className="h-full space-y-4">
            {messages.map((message) => (
              <div
                key={message.id}
@@ -110,14 +122,13 @@ export default function ChatWindow() {
              >
                {message.sender === 'other' && (
                   <Avatar className="h-8 w-8 shrink-0">
-                    {/* Placeholder for AI avatar, replace if you have one */}
-                    {/* <AvatarImage src={`/ai-avatar.png`} alt="AI Assistant" />  */}
+                    {/* Placeholder for AI avatar */}
                     <AvatarFallback>AI</AvatarFallback>
                   </Avatar>
                )}
                <div
                  className={cn(
-                   'max-w-[75%] rounded-lg p-3 text-sm break-words',
+                   'max-w-[75%] rounded-lg p-3 text-sm break-words shadow-sm', // Added shadow-sm
                    message.sender === 'user'
                      ? 'bg-primary text-primary-foreground'
                      : 'bg-muted text-muted-foreground'
@@ -130,7 +141,7 @@ export default function ChatWindow() {
                </div>
                 {message.sender === 'user' && (
                   <Avatar className="h-8 w-8 shrink-0">
-                     <AvatarImage src={`https://i.pravatar.cc/32?u=user`} alt="User" />
+                    {/* Using a placeholder/consistent avatar for user */}
                     <AvatarFallback>U</AvatarFallback>
                   </Avatar>
                 )}
@@ -140,12 +151,11 @@ export default function ChatWindow() {
            {isLoading && (
              <div className="flex items-start gap-3 justify-start">
                <Avatar className="h-8 w-8 shrink-0">
-                  {/* <AvatarImage src={`/ai-avatar.png`} alt="AI Assistant" /> */}
                   <AvatarFallback>AI</AvatarFallback>
                </Avatar>
-               <div className="max-w-[75%] rounded-lg p-3 text-sm bg-muted text-muted-foreground">
+               <div className="max-w-[75%] rounded-lg p-3 text-sm bg-muted text-muted-foreground shadow-sm">
                  <p className="italic flex items-center gap-1">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Typing...
+                    <Loader2 className="h-4 w-4 animate-spin" /> Thinking...
                  </p>
                </div>
              </div>
@@ -169,3 +179,4 @@ export default function ChatWindow() {
     </div>
   );
 }
+
