@@ -28,64 +28,75 @@ export default function Home() {
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
+    const currentVideoElement = videoRef.current; // Capture ref
+    const previousVideoSrc = videoSrc; // Capture previous state for potential revocation
 
     // --- Reset and cleanup logic ---
-    // Pause and reset current video if one is playing/loaded
-    if (videoRef.current) {
-        videoRef.current.pause();
+    if (currentVideoElement) {
+      currentVideoElement.pause(); // Pause whatever is playing
     }
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
-    setIsLoadingVideo(false); // Ensure loading indicator is off
+    setIsLoadingVideo(false); // Ensure loading indicator is off initially for the new file
 
-    // Revoke previous object URL if it exists *before* creating a new one
-    if (videoSrc && videoSrc.startsWith('blob:')) {
-        URL.revokeObjectURL(videoSrc);
-        console.log("Revoked previous object URL:", videoSrc);
-        setVideoSrc(null); // Clear the state *after* revocation
-    }
-    // --- End Reset ---
-
+    // --- Handle New File ---
     if (file && file.type.startsWith('video/')) {
-      const url = URL.createObjectURL(file);
-      console.log("Created new object URL:", url);
-      setVideoSrc(url); // Set the new URL for the state
+      const newUrl = URL.createObjectURL(file);
+      console.log("Created new object URL:", newUrl);
+      setVideoSrc(newUrl); // Update state first
       setIsLoadingVideo(true); // Start loading indicator
 
-      // Ensure video element is ready for the new source
-      if (videoRef.current) {
-        videoRef.current.src = url; // Set the src attribute directly
-        videoRef.current.load(); // Load the new source
-        videoRef.current.volume = volume;
-        videoRef.current.muted = isMuted;
-        // We'll attempt to play (if desired) or handle state in event listeners like 'canplay'
+      // Set source and load on the video element
+      if (currentVideoElement) {
+        currentVideoElement.src = newUrl;
+        currentVideoElement.load(); // Important: load the new source
+        currentVideoElement.volume = volume; // Re-apply settings
+        currentVideoElement.muted = isMuted;
+        // Event listeners will handle 'canplay' etc. to hide loader and enable play
       }
-    } else if (file) {
-       toast({
-         title: "Invalid File Type",
-         description: "Please upload a valid video file.",
-         variant: "destructive",
-       });
-       setVideoSrc(null); // Explicitly set to null if file is invalid
-       if (videoRef.current) {
-           videoRef.current.removeAttribute('src');
-           videoRef.current.load(); // Reset element
-       }
+
+      // Revoke the *previous* object URL *after* setting up the new one
+      if (previousVideoSrc && previousVideoSrc.startsWith('blob:')) {
+          URL.revokeObjectURL(previousVideoSrc);
+          console.log("Revoked previous object URL:", previousVideoSrc);
+      }
+
     } else {
-        // No file selected, ensure cleanup if a video was previously loaded
-        setVideoSrc(null);
-        if (videoRef.current) {
-           videoRef.current.removeAttribute('src');
-           videoRef.current.load(); // Reset element
-        }
+      // --- Handle Invalid File or No File ---
+      if (file) { // Invalid file type selected
+         toast({
+           title: "Invalid File Type",
+           description: "Please upload a valid video file.",
+           variant: "destructive",
+         });
+      }
+
+      // Reset video source state and element for invalid or no file
+      setVideoSrc(null);
+      if (currentVideoElement) {
+         // Explicitly remove the src attribute
+         currentVideoElement.removeAttribute('src');
+         // Optionally reset poster or other attributes if needed
+         // currentVideoElement.poster = '';
+         currentVideoElement.load(); // Call load() after removing src to reset the element's state
+         console.log("Video element reset due to invalid/no file.");
+      }
+
+      // Revoke the *previous* object URL if one existed and we're now clearing it
+       if (previousVideoSrc && previousVideoSrc.startsWith('blob:')) {
+           URL.revokeObjectURL(previousVideoSrc);
+           console.log("Revoked previous object URL during reset:", previousVideoSrc);
+       }
     }
 
-     // Reset the file input value to allow uploading the same file again
-     if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-     }
+    // Reset the file input value *at the very end* to allow uploading the same file again
+    // This is crucial to ensure the 'change' event fires even if the user selects the same file
+    if (event.target) {
+       event.target.value = '';
+    }
   };
+
 
   const handleUploadClick = () => {
     fileInputRef.current?.click();
@@ -196,44 +207,49 @@ export default function Home() {
 
   // Called when an error occurs while fetching or playing the media
   const handleVideoError = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
-    console.error('Video Error Event:', e);
+    console.error('Video Error Event triggered.'); // Log that the handler was called
     const videoElement = e.target as HTMLVideoElement;
     const error = videoElement.error;
+
+    // Log details regardless of whether error object exists
+    if (error) {
+      console.error('Video Error Code:', error.code);
+      console.error('Video Error Message:', error.message || '(No specific message)');
+    } else {
+      console.error('Video error event occurred, but no error object found on the element.');
+    }
+
+
     setIsLoadingVideo(false);
     setIsPlaying(false);
 
     // Ignore aborted errors, as they often happen during source changes or normal pauses
-     if (error?.code === MediaError.MEDIA_ERR_ABORTED) {
-       console.warn("Video loading/playback aborted. This is often normal.");
-       // If src is null, it was likely intentional reset, don't show error.
-       if(!videoSrc && !videoRef.current?.currentSrc){
+    if (error?.code === MediaError.MEDIA_ERR_ABORTED) {
+       console.warn("Video loading/playback aborted. This is often normal (e.g., new file load).");
+       // If src is null/empty, it was likely intentional reset, don't show error.
+       if(!videoElement.currentSrc){
+            console.log("Abort ignored as video source is empty.");
             return;
        }
        // If src exists but aborted, maybe show a less severe message or just log
        // toast({ title: 'Info', description: 'Video playback stopped.', variant: 'default' });
        return;
-     }
-
+    }
 
     let message = 'An unknown video error occurred.';
     if (error) {
-      console.error('Video Error Code:', error.code);
-      console.error('Video Error Message:', error.message);
       switch (error.code) {
-        // case MediaError.MEDIA_ERR_ABORTED: // 1 - Handled above
-        //   message = 'Video loading was aborted by the user or script.';
-        //   break;
         case MediaError.MEDIA_ERR_NETWORK: // 2
-          message = 'A network error caused the video download to fail part-way.';
+          message = 'A network error occurred while fetching the video. Please check your connection or try uploading again.';
           break;
         case MediaError.MEDIA_ERR_DECODE: // 3
-          message = 'The video playback was aborted due to a corruption problem or because the video used features your browser did not support.';
+          message = 'The video could not be decoded. The file might be corrupted or in an unsupported format.';
           break;
         case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED: // 4
-          message = 'The video could not be loaded, either because the server or network failed or because the format is not supported.';
+          message = 'The video format is not supported by your browser, or the video could not be loaded.';
           break;
         default:
-          message = `An unknown error occurred (Code: ${error.code}). ${error.message || ''}`;
+          message = `An unexpected error occurred (Code: ${error.code}). ${error.message || ''}`;
       }
        toast({
          title: 'Video Error',
@@ -241,21 +257,29 @@ export default function Home() {
          variant: 'destructive',
        });
     } else {
-        toast({ // Fallback if no error object exists
-             title: 'Video Error',
-             description: message,
+        // Fallback if no error object exists but the error event fired
+        toast({
+             title: 'Video Playback Error',
+             description: 'An error occurred while trying to play the video. It might be an unsupported format or a browser issue.',
              variant: 'destructive',
          });
     }
 
-     // Reset video state completely on significant error
-     setVideoSrc(null);
-      if(videoRef.current){
-        videoRef.current.removeAttribute('src');
-        videoRef.current.load(); // Reset element
-     }
-     setCurrentTime(0);
-     setDuration(0);
+    // --- Robust Reset ---
+    // Update state *before* manipulating the DOM element if possible
+    setVideoSrc(null);
+    setCurrentTime(0);
+    setDuration(0);
+
+    // Reset the video element itself
+    if(videoRef.current){
+       // Remove source and reset
+       videoRef.current.removeAttribute('src');
+       // Ensure listeners are detached if necessary (though useEffect cleanup should handle this)
+       videoRef.current.load(); // Reset the media element
+       console.log("Video element reset due to error.");
+    }
+
   };
 
 
@@ -313,58 +337,72 @@ export default function Home() {
     }
   };
 
-   // Effect for cleaning up the object URL when the component unmounts or videoSrc changes
+   // Effect for setting up and cleaning up event listeners and object URLs
    useEffect(() => {
-    const currentVideoSrc = videoSrc; // Capture src in effect scope for cleanup
     const video = videoRef.current;
+    const currentVideoSrc = videoSrc; // Capture src in effect scope for cleanup
 
-    // Add relevant event listeners when videoSrc is set
+    // Define listeners locally to ensure correct references
+    const onTimeUpdate = () => handleTimeUpdate();
+    const onLoadedMetadata = () => handleLoadedMetadata();
+    const onEnded = () => handleVideoEnd();
+    const onWaiting = () => handleWaiting();
+    const onCanPlay = () => handleCanPlay();
+    const onCanPlayThrough = () => handleCanPlayThrough();
+    const onError = (e: Event) => handleVideoError(e as unknown as React.SyntheticEvent<HTMLVideoElement, Event>); // Cast needed
+    const onPlay = () => setIsLoadingVideo(false); // Hide loading on successful play
+    const onPause = () => setIsLoadingVideo(false); // Hide loading on pause
+
     if (video && currentVideoSrc) {
-        // Clear previous listeners first to avoid duplicates if effect re-runs quickly
-        video.removeEventListener('timeupdate', handleTimeUpdate);
-        video.removeEventListener('loadedmetadata', handleLoadedMetadata);
-        video.removeEventListener('ended', handleVideoEnd);
-        video.removeEventListener('waiting', handleWaiting);
-        video.removeEventListener('canplay', handleCanPlay);
-        video.removeEventListener('canplaythrough', handleCanPlayThrough);
-        video.removeEventListener('error', handleVideoError);
-        video.removeEventListener('play', () => setIsLoadingVideo(false)); // Hide loading on successful play
-        video.removeEventListener('pause', () => setIsLoadingVideo(false)); // Hide loading on pause
+        // --- Add event listeners ---
+        video.addEventListener('timeupdate', onTimeUpdate);
+        video.addEventListener('loadedmetadata', onLoadedMetadata);
+        video.addEventListener('ended', onEnded);
+        video.addEventListener('waiting', onWaiting);
+        video.addEventListener('canplay', onCanPlay);
+        video.addEventListener('canplaythrough', onCanPlayThrough);
+        video.addEventListener('error', onError);
+        video.addEventListener('play', onPlay);
+        video.addEventListener('pause', onPause);
 
-
-        video.addEventListener('timeupdate', handleTimeUpdate);
-        video.addEventListener('loadedmetadata', handleLoadedMetadata);
-        video.addEventListener('ended', handleVideoEnd);
-        video.addEventListener('waiting', handleWaiting);
-        video.addEventListener('canplay', handleCanPlay);
-        video.addEventListener('canplaythrough', handleCanPlayThrough);
-        video.addEventListener('error', handleVideoError);
-        video.addEventListener('play', () => setIsLoadingVideo(false));
-        video.addEventListener('pause', () => setIsLoadingVideo(false));
-
+        console.log("Added event listeners for:", currentVideoSrc);
     }
 
+    // --- Cleanup function ---
     return () => {
-      // Revoke the object URL if it's a blob URL when source changes or component unmounts
+      // Remove event listeners
+      if (video) {
+          video.removeEventListener('timeupdate', onTimeUpdate);
+          video.removeEventListener('loadedmetadata', onLoadedMetadata);
+          video.removeEventListener('ended', onEnded);
+          video.removeEventListener('waiting', onWaiting);
+          video.removeEventListener('canplay', onCanPlay);
+          video.removeEventListener('canplaythrough', onCanPlayThrough);
+          video.removeEventListener('error', onError);
+          video.removeEventListener('play', onPlay);
+          video.removeEventListener('pause', onPause);
+          console.log("Removed event listeners.");
+      }
+
+      // Revoke the object URL *only if it's the one this effect instance was responsible for*
+      // This prevents revoking a URL that's still potentially needed by a rapid subsequent state update
       if (currentVideoSrc && currentVideoSrc.startsWith('blob:')) {
+        // Consider adding a small delay or checking if the src is still the current state src
+        // For simplicity now, we revoke immediately. If issues persist, look into delaying revocation.
         URL.revokeObjectURL(currentVideoSrc);
         console.log("Revoked object URL on cleanup:", currentVideoSrc);
       }
-      // Remove event listeners on cleanup
-      if (video) {
-          video.removeEventListener('timeupdate', handleTimeUpdate);
-          video.removeEventListener('loadedmetadata', handleLoadedMetadata);
-          video.removeEventListener('ended', handleVideoEnd);
-          video.removeEventListener('waiting', handleWaiting);
-          video.removeEventListener('canplay', handleCanPlay);
-          video.removeEventListener('canplaythrough', handleCanPlayThrough);
-          video.removeEventListener('error', handleVideoError);
-          video.removeEventListener('play', () => setIsLoadingVideo(false));
-          video.removeEventListener('pause', () => setIsLoadingVideo(false));
-      }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- Include all handlers used in the effect
-  }, [videoSrc, isPlaying, isLoadingVideo, volume, isMuted]); // Re-run this effect when videoSrc or related states change
+   // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [videoSrc]); // Only re-run when videoSrc changes
+
+   // Separate effect for state changes that *don't* require listener re-attachment
+    useEffect(() => {
+        if (videoRef.current) {
+            videoRef.current.muted = isMuted;
+            videoRef.current.volume = volume;
+        }
+    }, [isMuted, volume]);
 
 
   return (
@@ -393,7 +431,7 @@ export default function Home() {
                     onClick={handlePlayPause} // Play/pause on video click
                     playsInline // Important for mobile playback
                     preload="metadata" // Suggest browser load metadata quickly
-                    // src is set dynamically in handleFileChange
+                    // src is set dynamically in handleFileChange and useEffect
                   >
                      Your browser does not support the video tag.
                   </video>
@@ -489,8 +527,7 @@ export default function Home() {
                   ref={fileInputRef}
                   className="hidden"
                   aria-label="Upload video file"
-                  // Key is not needed if value is reset in handler
-                  // onClick={(e) => (e.currentTarget.value = '')} // Alternative way to reset
+                  // Resetting value is now handled in onChange handler
                 />
                 <Button onClick={handleUploadClick} variant="outline">
                   <Upload className="mr-2 h-4 w-4" /> Upload Video
