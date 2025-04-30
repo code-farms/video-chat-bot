@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -411,9 +412,10 @@ export default function Home() {
         <ThemeSwitcher />
       </header>
 
-      <div className="flex flex-1 flex-col lg:flex-row overflow-hidden">
+      {/* Main Content Container - Allows scrolling on mobile */}
+      <div className="flex flex-1 flex-col lg:flex-row lg:overflow-hidden"> {/* Changed overflow-hidden to lg:overflow-hidden */}
         {/* Video Section (Left - 60%) */}
-        <div className="w-full lg:w-3/5 p-6 flex flex-col items-center justify-center order-1">
+        <div className="w-full lg:w-3/5 p-6 flex flex-col items-center justify-start lg:justify-center order-1"> {/* justify-start for mobile */}
           <Card className="w-full max-w-3xl bg-card text-card-foreground shadow-lg rounded-lg overflow-hidden">
             <CardHeader>
               <CardTitle className="text-xl font-semibold text-center text-primary">
@@ -538,7 +540,8 @@ export default function Home() {
         </div>
 
         {/* Chat Window (Right - 40%) */}
-        <div className="w-full lg:w-2/5 border-t lg:border-t-0 lg:border-l border-border bg-card text-card-foreground p-4 flex flex-col max-h-[60vh] lg:max-h-full lg:h-auto order-2">
+        {/* Removed max-h-[60vh] for mobile, kept lg:max-h-full for large screens */}
+        <div className="w-full lg:w-2/5 border-t lg:border-t-0 lg:border-l border-border bg-card text-card-foreground p-4 flex flex-col lg:max-h-full lg:h-auto order-2 min-h-[300px] lg:min-h-0"> {/* Added min-h for mobile */}
           <ChatWindow />
         </div>
       </div>
