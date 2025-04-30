@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider'; // Import Slider for progress bar
 import ChatWindow from '@/components/ChatWindow';
 import ThemeSwitcher from '@/components/ThemeSwitcher';
-import { formatTime } from '@/lib/utils'; // Helper function for time formatting
+import { formatTime, cn } from '@/lib/utils'; // Helper function for time formatting and cn utility
 import { useToast } from '@/hooks/use-toast'; // Import useToast
 
 
@@ -37,6 +37,7 @@ export default function Home() {
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+    setIsLoadingVideo(false); // Ensure loading indicator is off
 
     // Revoke previous object URL if it exists *before* creating a new one
     if (videoSrc && videoSrc.startsWith('blob:')) {
@@ -99,14 +100,14 @@ export default function Home() {
       setIsPlaying(false);
     } else {
       // Check if video is ready enough to play
-      if (video.readyState >= video.HAVE_FUTURE_DATA) {
+      if (video.readyState >= video.HAVE_FUTURE_DATA || video.readyState >= video.HAVE_ENOUGH_DATA) {
         try {
           await video.play();
           setIsPlaying(true);
           setIsLoadingVideo(false); // Ensure loading is off if play succeeds
         } catch (error) {
           console.error("Error playing video:", error);
-          // Ignore the specific interruption error (e.g., user clicks play/pause rapidly)
+          // Ignore the specific interruption error (e.g., user clicks play/pause rapidly or loads new source)
           if ((error as DOMException).name !== 'AbortError') {
              toast({
                 title: "Playback Error",
@@ -119,16 +120,18 @@ export default function Home() {
                 videoRef.current.removeAttribute('src');
                 videoRef.current.load();
              }
+             setIsLoadingVideo(false);
           }
           setIsPlaying(false); // Ensure state is correct if play failed or was aborted
         }
       } else {
         // If not ready, indicate loading and wait for 'canplay' or 'canplaythrough'
          setIsLoadingVideo(true);
-         toast({
-           title: "Video Loading",
-           description: "Please wait for the video to load before playing.",
-         });
+         // Optionally attempt to play again later via 'canplay' handler
+         // toast({
+         //   title: "Video Loading",
+         //   description: "Please wait for the video to load before playing.",
+         // });
       }
     }
   };
@@ -150,6 +153,7 @@ export default function Home() {
       setDuration(videoRef.current.duration);
       // Metadata loaded doesn't mean it's ready to play smoothly yet
       // Keep isLoadingVideo potentially true until 'canplay' or 'canplaythrough'
+      // setIsLoadingVideo(true); // It might already be true, or we might wait for canplay
     }
   };
 
@@ -179,30 +183,46 @@ export default function Home() {
    // Called when the browser can play the media, but estimates that not enough data has been loaded
    const handleCanPlay = () => {
        // Often a good point to consider the video 'loaded enough' to hide initial spinner
-       // but might still buffer later, hence handleCanPlayThrough is more robust for 'ready' state
        setIsLoadingVideo(false);
-       if (videoRef.current && duration === 0) { // Update duration if not set yet
+       if (videoRef.current && duration === 0 && videoRef.current.duration > 0) { // Update duration if not set yet and valid
             setDuration(videoRef.current.duration);
        }
+        // Attempt to play if the user intended to play
+        if (isPlaying && videoRef.current?.paused) {
+            handlePlayPause(); // Re-trigger play logic which checks readyState again
+        }
    };
 
 
   // Called when an error occurs while fetching or playing the media
   const handleVideoError = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
     console.error('Video Error Event:', e);
+    const videoElement = e.target as HTMLVideoElement;
+    const error = videoElement.error;
     setIsLoadingVideo(false);
     setIsPlaying(false);
+
+    // Ignore aborted errors, as they often happen during source changes or normal pauses
+     if (error?.code === MediaError.MEDIA_ERR_ABORTED) {
+       console.warn("Video loading/playback aborted. This is often normal.");
+       // If src is null, it was likely intentional reset, don't show error.
+       if(!videoSrc && !videoRef.current?.currentSrc){
+            return;
+       }
+       // If src exists but aborted, maybe show a less severe message or just log
+       // toast({ title: 'Info', description: 'Video playback stopped.', variant: 'default' });
+       return;
+     }
+
+
     let message = 'An unknown video error occurred.';
-    const videoElement = e.target as HTMLVideoElement;
-    if (videoElement.error) {
-      console.error('Video Error Code:', videoElement.error.code);
-      console.error('Video Error Message:', videoElement.error.message);
-      switch (videoElement.error.code) {
-        case MediaError.MEDIA_ERR_ABORTED: // 1
-          message = 'Video loading was aborted by the user or script.';
-           // This might happen normally if src changes, maybe don't show toast unless debugging
-           console.warn("Video load aborted.");
-           return; // Often not a user-facing error that needs a toast
+    if (error) {
+      console.error('Video Error Code:', error.code);
+      console.error('Video Error Message:', error.message);
+      switch (error.code) {
+        // case MediaError.MEDIA_ERR_ABORTED: // 1 - Handled above
+        //   message = 'Video loading was aborted by the user or script.';
+        //   break;
         case MediaError.MEDIA_ERR_NETWORK: // 2
           message = 'A network error caused the video download to fail part-way.';
           break;
@@ -213,15 +233,22 @@ export default function Home() {
           message = 'The video could not be loaded, either because the server or network failed or because the format is not supported.';
           break;
         default:
-          message = `An unknown error occurred (Code: ${videoElement.error.code}). ${videoElement.error.message || ''}`;
+          message = `An unknown error occurred (Code: ${error.code}). ${error.message || ''}`;
       }
+       toast({
+         title: 'Video Error',
+         description: message,
+         variant: 'destructive',
+       });
+    } else {
+        toast({ // Fallback if no error object exists
+             title: 'Video Error',
+             description: message,
+             variant: 'destructive',
+         });
     }
-     toast({
-       title: 'Video Error',
-       description: message,
-       variant: 'destructive',
-     });
-     // Reset video state completely on error
+
+     // Reset video state completely on significant error
      setVideoSrc(null);
       if(videoRef.current){
         videoRef.current.removeAttribute('src');
@@ -289,25 +316,55 @@ export default function Home() {
    // Effect for cleaning up the object URL when the component unmounts or videoSrc changes
    useEffect(() => {
     const currentVideoSrc = videoSrc; // Capture src in effect scope for cleanup
-
-    // Add error listener when videoSrc is set
     const video = videoRef.current;
-     if (video && currentVideoSrc) {
-       video.addEventListener('error', handleVideoError);
-     }
+
+    // Add relevant event listeners when videoSrc is set
+    if (video && currentVideoSrc) {
+        // Clear previous listeners first to avoid duplicates if effect re-runs quickly
+        video.removeEventListener('timeupdate', handleTimeUpdate);
+        video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        video.removeEventListener('ended', handleVideoEnd);
+        video.removeEventListener('waiting', handleWaiting);
+        video.removeEventListener('canplay', handleCanPlay);
+        video.removeEventListener('canplaythrough', handleCanPlayThrough);
+        video.removeEventListener('error', handleVideoError);
+        video.removeEventListener('play', () => setIsLoadingVideo(false)); // Hide loading on successful play
+        video.removeEventListener('pause', () => setIsLoadingVideo(false)); // Hide loading on pause
+
+
+        video.addEventListener('timeupdate', handleTimeUpdate);
+        video.addEventListener('loadedmetadata', handleLoadedMetadata);
+        video.addEventListener('ended', handleVideoEnd);
+        video.addEventListener('waiting', handleWaiting);
+        video.addEventListener('canplay', handleCanPlay);
+        video.addEventListener('canplaythrough', handleCanPlayThrough);
+        video.addEventListener('error', handleVideoError);
+        video.addEventListener('play', () => setIsLoadingVideo(false));
+        video.addEventListener('pause', () => setIsLoadingVideo(false));
+
+    }
 
     return () => {
-      // Revoke the object URL if it's a blob URL
+      // Revoke the object URL if it's a blob URL when source changes or component unmounts
       if (currentVideoSrc && currentVideoSrc.startsWith('blob:')) {
         URL.revokeObjectURL(currentVideoSrc);
         console.log("Revoked object URL on cleanup:", currentVideoSrc);
       }
-      // Remove error listener on cleanup
+      // Remove event listeners on cleanup
       if (video) {
+          video.removeEventListener('timeupdate', handleTimeUpdate);
+          video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+          video.removeEventListener('ended', handleVideoEnd);
+          video.removeEventListener('waiting', handleWaiting);
+          video.removeEventListener('canplay', handleCanPlay);
+          video.removeEventListener('canplaythrough', handleCanPlayThrough);
           video.removeEventListener('error', handleVideoError);
+          video.removeEventListener('play', () => setIsLoadingVideo(false));
+          video.removeEventListener('pause', () => setIsLoadingVideo(false));
       }
     };
-  }, [videoSrc]); // Re-run this effect when videoSrc changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- Include all handlers used in the effect
+  }, [videoSrc, isPlaying, isLoadingVideo, volume, isMuted]); // Re-run this effect when videoSrc or related states change
 
 
   return (
@@ -332,17 +389,11 @@ export default function Home() {
                 <video
                     ref={videoRef}
                     className="w-full h-full object-contain" // Use contain to see whole video
-                    onTimeUpdate={handleTimeUpdate}
-                    onLoadedMetadata={handleLoadedMetadata}
-                    onEnded={handleVideoEnd}
-                    // onError is handled by the effect listener
-                    onWaiting={handleWaiting}
-                    onCanPlay={handleCanPlay} // Use canplay to remove initial spinner
-                    onCanPlayThrough={handleCanPlayThrough} // Use canplaythrough for buffering indication
+                    // Event listeners are added/removed in the useEffect hook
                     onClick={handlePlayPause} // Play/pause on video click
                     playsInline // Important for mobile playback
                     preload="metadata" // Suggest browser load metadata quickly
-                    // src is set dynamically in handleFileChange / useEffect
+                    // src is set dynamically in handleFileChange
                   >
                      Your browser does not support the video tag.
                   </video>
