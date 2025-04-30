@@ -9,6 +9,9 @@ export default {
   ],
   theme: {
   	extend: {
+      fontFamily: {
+        sans: ["var(--font-sans)"], // Use the CSS variable defined in globals.css
+      },
   		colors: {
         // Use CSS variables defined in globals.css for theme colors
   			background: 'hsl(var(--background))',
